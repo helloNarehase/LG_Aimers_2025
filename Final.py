@@ -1,52 +1,55 @@
-import argparse
+import numpy as np
 import pandas as pd
 import torch
+
 from tabtransformer import train_model
-from sklearn.preprocessing import LabelEncoder, StandardScaler
-from sklearn.decomposition import PCA
+from base_utils import numeric_columns, categoric_columns
+
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.preprocessing import OrdinalEncoder, StandardScaler
 from sklearn.model_selection import train_test_split
 
+
 def preprocess_data(train_file_path, test_file_path):
-    train_df = pd.read_csv(train_file_path, encoding='utf-8-sig')
-    test_df = pd.read_csv(test_file_path, encoding='utf-8-sig')
+    train_df = pd.read_csv(train_file_path).drop(columns=['ID'])
+    test_df = pd.read_csv(test_file_path).drop(columns=['ID'])
     
-    # Handling categorical features
-    categorical_cols = train_df.select_dtypes(include=['object']).columns
-    label_encoders = {}
-    for col in categorical_cols:
-        le = LabelEncoder()
-        train_df[col] = le.fit_transform(train_df[col])
-        test_df[col] = le.fit_transform(test_df[col])
-        label_encoders[col] = le
-    
+    X = train_df.drop('임신 성공 여부', axis=1)
+    y = train_df['임신 성공 여부']
+
+    # Encoding categorical features
+    for col in categoric_columns:
+        X[col] = X[col].astype(str)
+        test_df[col] = test_df[col].astype(str)
+
+    ordinal_encoder = OrdinalEncoder(handle_unknown='use_encoded_value', unknown_value=-1)
+    X_train_encoded = X.copy()
+    X_train_encoded[categoric_columns] = ordinal_encoder.fit_transform(X[categoric_columns])
+    X_test_encoded = test_df.copy()
+    X_test_encoded[categoric_columns] = ordinal_encoder.transform(test_df[categoric_columns])
+
     # Normalizing numerical features
-    # numerical_columns = train_df.select_dtypes(include=['int64', 'float64']).columns
-    # scaler = StandardScaler()
-    # train_df[numerical_columns] = scaler.fit_transform(train_df[numerical_columns])
-    # test_df[numerical_columns] = scaler.fit_transform(test_df[numerical_columns])
-    
-    X = train_df.drop(["임신 성공 여부"], axis=1)
-    y = train_df["임신 성공 여부"]
-
-    # PCA
     scaler = StandardScaler()
-    train_scaled = scaler.fit_transform(X)
-    test_scaled = scaler.transform(test_df)
-
-    pca = PCA(n_components=0.95)
-    train_pca = pca.fit_transform(train_scaled)
-    test_pca = pca.transform(test_scaled)
-
-    X_train, X_val, y_train, y_val = train_test_split(train_pca, y, test_size=0.2, random_state=42)
+    X_train_encoded[numeric_columns] = scaler.fit_transform(X[numeric_columns])
+    X_test_encoded[numeric_columns] = scaler.transform(test_df[numeric_columns])
     
-    return X_train, X_val, y_train, y_val, test_pca
+    # RF feature select
+    rf = RandomForestClassifier(n_estimators=100, random_state=42)
+    rf.fit(X_train_encoded, y)
+    feature_importances = pd.Series(rf.feature_importances_, index=X_train_encoded.columns)
+    important_features = feature_importances[feature_importances > 0.01].index
+    X_train_filtered = X_train_encoded[important_features]
+    X_test_filtered = X_test_encoded[important_features]
+    X_train, X_val, y_train, y_val = train_test_split(X_train_filtered, y, test_size=0.2, random_state=42)
+    
+    return X_train, X_val, y_train, y_val, X_test_filtered
 
 def main():
     train_file = "train_cleaned.csv"
     test_file = "test_cleaned.csv"
     model_output = "tabtransformer_model.pth"
-    epochs = 200
-    batch_size = 128
+    epochs = 500
+    batch_size = 256
     learning_rate = 1e-6
     
     print("Loading and preprocessing data...")
@@ -62,6 +65,13 @@ def main():
     # Save model
     torch.save(model.state_dict(), model_output)
     print(f"Model saved as {model_output}")
+
+    # test submit
+    pred_proba = model.predict_proba(test_df)[:, 1]
+    sample_submission = pd.read_csv('./Data/sample_submission.csv')
+    sample_submission['probability'] = pred_proba
+    sample_submission.to_csv('./submit.csv', index=False)
+    print("Submission file saved as submit.csv")
 
 if __name__ == "__main__":
     main()

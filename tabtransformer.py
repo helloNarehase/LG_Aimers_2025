@@ -33,10 +33,28 @@ class TabTransformer(nn.Module):
         x = x.squeeze(1)  # Remove sequence dimension
         x = self.fc(x)
         return self.sigmoid(x)
+    
+    def predict_proba(self, X):
+        """
+        입력 X (numpy array 또는 pandas DataFrame)를 받아서 
+        (n_samples, 2) 형태의 확률 배열을 반환합니다.
+        첫 번째 열은 클래스 0의 확률, 두 번째 열은 클래스 1의 확률입니다.
+        """
+        self.eval()
+        # 만약 X가 DataFrame이면 numpy array로 변환
+        if isinstance(X, pd.DataFrame):
+            X = X.values
+        # 입력 데이터를 텐서로 변환
+        X_tensor = torch.tensor(X, dtype=torch.float32).to(device)
+        with torch.no_grad():
+            outputs = self.forward(X_tensor).cpu().numpy()  # shape: (n_samples, 1)
+        # scikit-learn과 유사한 (n_samples, 2) 배열로 변환: [1-prob, prob]
+        probas = np.concatenate([1 - outputs, outputs], axis=1)
+        return probas
 
 class Live_Dataset(Dataset):
     def __init__(self, X, y):
-        self.X = torch.tensor(X, dtype=torch.float32).to(device)
+        self.X = torch.tensor(X.to_numpy(), dtype=torch.float32).to(device)
         self.y = torch.tensor(y.to_numpy(), dtype=torch.float32).unsqueeze(1).to(device)
     
     def __len__(self):
@@ -54,7 +72,7 @@ def train_model(X_train, X_val, y_train, y_val, epochs=40, batch_size=512, learn
     val_loader = DataLoader(val_dataset, batch_size=batch_size)
     
     model = TabTransformer(input_dim=X_train.shape[1]).to(device)
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    optimizer = optim.AdamW(model.parameters(), lr=learning_rate)
     criterion = nn.BCELoss()
     
     for epoch in range(epochs):
