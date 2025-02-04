@@ -10,7 +10,7 @@ from sklearn.metrics import roc_auc_score, average_precision_score, accuracy_sco
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class TabTransformer(nn.Module):
-    def __init__(self, input_dim, num_heads=4, ff_dim=128, num_layers=2, dropout_rate=0.2):
+    def __init__(self, input_dim, num_heads=4, ff_dim=128, num_layers=3, dropout_rate=0.2):
         super(TabTransformer, self).__init__()
         
         self.embedding = nn.Linear(input_dim, ff_dim)
