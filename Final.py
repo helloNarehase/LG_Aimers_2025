@@ -49,7 +49,7 @@ def main():
     test_file = "test_cleaned.csv"
     model_output = "tabtransformer_model.pth"
     epochs = 500
-    batch_size = 256
+    batch_size = 1024
     learning_rate = 1e-6
     
     print("Loading and preprocessing data...")

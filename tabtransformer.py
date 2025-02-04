@@ -10,7 +10,7 @@ from sklearn.metrics import roc_auc_score, average_precision_score, accuracy_sco
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class TabTransformer(nn.Module):
-    def __init__(self, input_dim, num_heads=4, ff_dim=128, num_layers=1, dropout_rate=0.2):
+    def __init__(self, input_dim, num_heads=4, ff_dim=128, num_layers=2, dropout_rate=0.2):
         super(TabTransformer, self).__init__()
         
         self.embedding = nn.Linear(input_dim, ff_dim)
@@ -32,26 +32,37 @@ class TabTransformer(nn.Module):
         
         x = x.squeeze(1)  # Remove sequence dimension
         x = self.fc(x)
-        return self.sigmoid(x)
+        return x # Logits 반환 (sigmoid 적용 x)
     
     def predict_proba(self, X):
-        """
-        입력 X (numpy array 또는 pandas DataFrame)를 받아서 
-        (n_samples, 2) 형태의 확률 배열을 반환합니다.
-        첫 번째 열은 클래스 0의 확률, 두 번째 열은 클래스 1의 확률입니다.
-        """
         self.eval()
-        # 만약 X가 DataFrame이면 numpy array로 변환
         if isinstance(X, pd.DataFrame):
-            X = X.values
-        # 입력 데이터를 텐서로 변환
+            X = X.to_numpy()
         X_tensor = torch.tensor(X, dtype=torch.float32).to(device)
         with torch.no_grad():
-            outputs = self.forward(X_tensor).cpu().numpy()  # shape: (n_samples, 1)
-        # scikit-learn과 유사한 (n_samples, 2) 배열로 변환: [1-prob, prob]
-        probas = np.concatenate([1 - outputs, outputs], axis=1)
-        return probas
+            logits = self.forward(X_tensor).cpu().numpy()  # shape: (n_samples, 1)
+        probas = 1 / (1 + np.exp(-logits))  # Sigmoid 적용
+        return np.concatenate([1 - probas, probas], axis=1)  # [1-prob, prob] 형식 반환
 
+class FocalLoss(nn.Module):
+    def __init__(self, alpha=0.25, gamma=2.0, reduction='mean'):
+        super(FocalLoss, self).__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+        self.reduction = reduction
+
+    def forward(self, inputs, targets):
+        BCE_loss = F.binary_cross_entropy_with_logits(inputs, targets, reduction='none')  # logits 사용
+        pt = torch.exp(-BCE_loss)  # 확률 변환
+        focal_loss = self.alpha * (1 - pt) ** self.gamma * BCE_loss
+
+        if self.reduction == 'mean':
+            return focal_loss.mean()
+        elif self.reduction == 'sum':
+            return focal_loss.sum()
+        else:
+            return focal_loss
+        
 class Live_Dataset(Dataset):
     def __init__(self, X, y):
         self.X = torch.tensor(X.to_numpy(), dtype=torch.float32).to(device)
@@ -73,15 +84,15 @@ def train_model(X_train, X_val, y_train, y_val, epochs=40, batch_size=512, learn
     
     model = TabTransformer(input_dim=X_train.shape[1]).to(device)
     optimizer = optim.AdamW(model.parameters(), lr=learning_rate)
-    criterion = nn.BCELoss()
+    criterion = FocalLoss(alpha=0.25, gamma=0.2)
     
     for epoch in range(epochs):
         model.train()
         train_loss = 0.0
         for batch_X, batch_y in train_loader:
             optimizer.zero_grad()
-            outputs = model(batch_X)
-            loss = criterion(outputs, batch_y)
+            outputs = model(batch_X) # Logits 출력
+            loss = criterion(outputs, batch_y) # Focal Loss 적용
             loss.backward()
             optimizer.step()
             train_loss += loss.item()
@@ -97,7 +108,7 @@ def train_model(X_train, X_val, y_train, y_val, epochs=40, batch_size=512, learn
                 outputs = model(batch_X)
                 loss = criterion(outputs, batch_y)
                 val_loss += loss.item()
-                all_preds.extend(outputs.cpu().numpy())
+                all_preds.extend(torch.sigmoid(outputs).cpu().numpy()) # 확률 변환
                 all_targets.extend(batch_y.cpu().numpy())
             
             val_loss /= len(val_loader)
