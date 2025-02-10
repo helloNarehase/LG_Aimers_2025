@@ -118,7 +118,7 @@ def train_model(X_train, X_val, y_train, y_val, epochs=40, batch_size=512, learn
             print(f'Epoch {epoch+1}/{epochs}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}, ROC AUC: {roc_auc:.4f}, PR AUC: {pr_auc:.4f}')
     
     pred_proba = np.array(all_preds)
-    y_val_pred = (pred_proba >= 0.3).astype(int)
+    y_val_pred = (pred_proba >= 0.5).astype(int)
     print("Accuracy:", accuracy_score(y_val, y_val_pred))
     print(classification_report(y_val, y_val_pred))
     print("AUC PR:", average_precision_score(y_val, pred_proba))
