@@ -4,7 +4,8 @@ import torch
 
 from tabtransformer import train_model
 from sklearn.model_selection import train_test_split
-
+from sklearn.preprocessing import StandardScaler
+from imblearn.under_sampling import RandomUnderSampler
 
 def preprocess_data(train_file_path, test_file_path):
     train_df = pd.read_csv(train_file_path)
@@ -15,15 +16,25 @@ def preprocess_data(train_file_path, test_file_path):
     
     X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
     
+    # 학습 데이터에 대해 언더샘플링 적용
+    rus = RandomUnderSampler(random_state=42)
+    X_train, y_train = rus.fit_resample(X_train, y_train)
+
+    # Feature Scaling 적용
+    scaler = StandardScaler()
+    X_train = pd.DataFrame(scaler.fit_transform(X_train), columns=X_train.columns)
+    X_val = pd.DataFrame(scaler.transform(X_val), columns=X_val.columns)
+    test_df = pd.DataFrame(scaler.transform(test_df), columns=test_df.columns)
+    
     return X_train, X_val, y_train, y_val, test_df
 
 def main():
     train_file = "data_preprocess/train_e.csv"
     test_file = "data_preprocess/test_e.csv"
-    model_output = "ttf_model.pth"
+    model_output = "best_model.pth"
     epochs = 500
-    batch_size = 128
-    learning_rate = 1e-6
+    batch_size = 64
+    learning_rate = 1e-5
     
     print("Loading and preprocessing data...")
     X_train, X_val, y_train, y_val, test_df = preprocess_data(train_file, test_file)
@@ -35,9 +46,10 @@ def main():
 
     print("\nTraining complete!")
     
-    # Save model
-    torch.save(model.state_dict(), model_output)
-    print(f"Model saved as {model_output}")
+    # Load model
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.load_state_dict(torch.load(model_output, map_location=device))
+    model.eval()
 
     # test submit
     pred_proba = model.predict_proba(test_df)[:, 1]
